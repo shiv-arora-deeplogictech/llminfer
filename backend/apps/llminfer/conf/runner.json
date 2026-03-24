@@ -1,0 +1,13 @@
+{
+    "model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "model_slug": "Qwen-Qwen2.5-0.5B-Instruct",
+    "backend": "vllm",
+    "device": "cpu",
+    "inference_host": "0.0.0.0",
+    "inference_port": 8080,
+    "monkshu_host": "0.0.0.0",
+    "monkshu_port": 8081,
+    "ssl": false,
+    "disable_thinking": true,
+    "hf_offline": true
+}

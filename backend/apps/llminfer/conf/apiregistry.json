@@ -1,0 +1,4 @@
+{
+    "/apps/{{app}}/infer"    : "/apis/llminfer.js?get=true",
+    "/apps/{{app}}/sseinfer" : "/apis/llminfer.js?get=true&sse=true&sseint=100"
+}
