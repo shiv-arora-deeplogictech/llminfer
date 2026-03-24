@@ -1,4 +1,37 @@
 {
-    "host": "0.0.0.0",
-    "port": 8081
+    "extensions": [
+        "redirect",
+        "httpverbs"
+    ],
+    "redirects": [
+        {
+            "^http(.*)://([^/]+?)/index.html$": "http{{{$1}}}://{{{$2}}}/apps/{{{app}}}/index.html"
+        },
+        {
+            "^http(.*)://([^/]+?)/$": "http{{{$1}}}://{{{$2}}}/apps/{{{app}}}/index.html"
+        },
+        {
+            "^http(.*)://([^/]+?)$": "http{{{$1}}}://{{{$2}}}/apps/{{{app}}}/index.html"
+        }
+    ],
+    "diskCache": {
+        "refresh": 10000,
+        "dontCache": [
+            ".*\\.pdf"
+        ],
+        "maxSizeInMB": "1024",
+        "ignoreAfterMaxHits": 10
+    },
+    "httpdHeaders": {
+        "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Methods": "HEAD,GET",
+        "Service-Worker-Allowed": "/"
+    },
+    "ssl": false,
+    "sslKeyFile": "/home/deep/ssh-Certs/sslKeyFile.key",
+    "sslCertFile": "/home/deep/ssh-Certs/sslCertFile.crt",
+    "port": 8080,
+    "host": "{{{hostname}}}"
 }
