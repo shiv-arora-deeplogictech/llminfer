@@ -1,4 +1,4 @@
 {
-    "/apps/{{app}}/infer"    : "/apis/llminfer.js?get=true",
-    "/apps/{{app}}/sseinfer" : "/apis/llminfer.js?get=true&sse=true&sseint=100"
+    "/apps/{{app}}/infer"    : "/apis/llminfer.js",
+    "/apps/{{app}}/sseinfer" : "/apis/llminfer.js?sse=true&sseint=100"
 }

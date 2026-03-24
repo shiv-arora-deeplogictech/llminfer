@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # LLMinfer entry point. Sets up the Python venv, downloads the HF model,
 # patches runner.json with the resolved configuration, and launches Monkshu.
-# Usage: llminfer.sh [hf_model_name] [--port PORT] [--host HOST] [--ssl]
+# Usage: llminfer.sh --model MODEL [--port PORT] [--host HOST] [--ssl]
 #                    [--inference-port PORT] [--backend BACKEND] [--hf-token TOKEN]
+#                    [--quantization QUANT]   (required for --backend llamacpp)
 # (C) 2025 TekMonks. All rights reserved.
 
 SOURCE="${BASH_SOURCE[0]}"
@@ -20,26 +21,25 @@ RUNNER_JSON="$SCRIPT_DIR/backend/apps/llminfer/conf/runner.json"
 
 # Defaults
 MODEL_NAME=""
-MONKSHU_PORT=8081
-MONKSHU_HOST="0.0.0.0"
+QUANTIZATION=""
 INFERENCE_PORT=""           # set per-backend below if not overridden
 INFERENCE_HOST="0.0.0.0"
 BACKEND="vllm"
-DEVICE="cpu"
 SSL=false
 HF_TOKEN="${HF_TOKEN:-}"   # fall back to environment variable if set
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --port)             MONKSHU_PORT="$2";   shift 2 ;;
-        --host)             MONKSHU_HOST="$2";   shift 2 ;;
+        --model)            MODEL_NAME="$2";     shift 2 ;;
+        --port)             INFERENCE_PORT="$2"; shift 2 ;;
+        --host)             INFERENCE_HOST="$2"; shift 2 ;;
         --inference-port)   INFERENCE_PORT="$2"; shift 2 ;;
         --backend)          BACKEND="$2";        shift 2 ;;
-        --device)           DEVICE="$2";         shift 2 ;;
+        --quantization)     QUANTIZATION="$2";   shift 2 ;;
         --ssl)              SSL=true;            shift ;;
         --hf-token)         HF_TOKEN="$2";       shift 2 ;;
-        *)                  MODEL_NAME="$1";     shift ;;
+        *)                  shift ;;
     esac
 done
 
@@ -49,29 +49,47 @@ if [ -z "$INFERENCE_PORT" ]; then
 fi
 
 if [ -z "$MODEL_NAME" ]; then
-    echo "Usage: llminfer.sh <model_name> [--port PORT] [--host HOST] [--ssl] [--inference-port PORT] [--backend BACKEND] [--hf-token TOKEN]"
+    echo "Usage: llminfer.sh --model MODEL [--port PORT] [--host HOST] [--ssl]"
+    echo "                   [--inference-port PORT] [--backend BACKEND] [--hf-token TOKEN]"
+    echo "                   [--quantization QUANT]"
     echo ""
-    echo "Example:"
-    echo "  llminfer.sh google/gemma-3-4b-it --hf-token hf_xxxx"
+    echo "Examples:"
+    echo "  llminfer.sh --model google/gemma-3-4b-it --hf-token hf_xxxx"
+    echo "  llminfer.sh --model Qwen/Qwen2.5-0.5B-Instruct-GGUF --backend llamacpp --quantization Q5_K_M"
     echo ""
     echo "Tip: set HF_TOKEN in your environment to avoid passing it each time."
     exit 1
 fi
 
+if [ "$BACKEND" = "llamacpp" ] && [ -z "$QUANTIZATION" ]; then
+    echo "LLMinfer: --quantization is required for --backend llamacpp"
+    echo "LLMinfer: Example: --quantization Q5_K_M"
+    exit 1
+fi
+
 MODEL_SLUG=$(echo "$MODEL_NAME" | tr '/' '--' | tr ':' '-')
+QUANT_LOWER=$(echo "$QUANTIZATION" | tr '[:upper:]' '[:lower:]')
+QUANT_UPPER=$(echo "$QUANTIZATION" | tr '[:lower:]' '[:upper:]')
+GGUF_FILE=""
 
-echo "LLMinfer: model=$MODEL_NAME backend=$BACKEND monkshu=$MONKSHU_HOST:$MONKSHU_PORT inference=$INFERENCE_HOST:$INFERENCE_PORT"
+echo "LLMinfer: model=$MODEL_NAME backend=$BACKEND inference=$INFERENCE_HOST:$INFERENCE_PORT${QUANTIZATION:+ quantization=$QUANTIZATION}"
 
-# ── vLLM backend ─────────────────────────────────────────────────────
+export LLMINFER_BACKEND="$BACKEND"
+
 # Step 1 - Bootstrap Python venv (idempotent)
 echo "LLMinfer: Initializing Python environment..."
 bash "$PYTHON_SH" -c "print('Python environment ready.')"
 
     # Step 2 - Download model into models/ (idempotent)
     export HF_HOME="$MODELS_DIR"
-    # A model directory is "ready" only when it contains a config file.
+    # For llamacpp: ready when a matching GGUF file is present.
+    # For vllm: ready when a config file is present.
     _model_ready() {
-        [ -f "$MODELS_DIR/$MODEL_SLUG/config.json" ] || [ -f "$MODELS_DIR/$MODEL_SLUG/params.json" ]
+        if [ "$BACKEND" = "llamacpp" ]; then
+            find "$MODELS_DIR/$MODEL_SLUG" -maxdepth 3 \( -iname "*${QUANT_LOWER}*.gguf" -o -iname "*${QUANT_UPPER}*.gguf" \) 2>/dev/null | grep -q .
+        else
+            [ -f "$MODELS_DIR/$MODEL_SLUG/config.json" ] || [ -f "$MODELS_DIR/$MODEL_SLUG/params.json" ]
+        fi
     }
 
     if _model_ready; then
@@ -81,18 +99,37 @@ bash "$PYTHON_SH" -c "print('Python environment ready.')"
 
         _do_download() {
             local _hf_tok="$1"
-            if [ -n "$_hf_tok" ]; then
-                bash "$PYTHON_SH" -c "
+            if [ "$BACKEND" = "llamacpp" ]; then
+                # Download only the GGUF file matching the requested quantization.
+                if [ -n "$_hf_tok" ]; then
+                    bash "$PYTHON_SH" -c "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='$MODEL_NAME', local_dir='$MODELS_DIR/$MODEL_SLUG',
+    allow_patterns=['*${QUANT_LOWER}*.gguf', '*${QUANT_UPPER}*.gguf'], token='$_hf_tok')
+print('Model download complete.')
+"
+                else
+                    bash "$PYTHON_SH" -c "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='$MODEL_NAME', local_dir='$MODELS_DIR/$MODEL_SLUG',
+    allow_patterns=['*${QUANT_LOWER}*.gguf', '*${QUANT_UPPER}*.gguf'])
+print('Model download complete.')
+"
+                fi
+            else
+                if [ -n "$_hf_tok" ]; then
+                    bash "$PYTHON_SH" -c "
 from huggingface_hub import snapshot_download
 snapshot_download(repo_id='$MODEL_NAME', local_dir='$MODELS_DIR/$MODEL_SLUG', token='$_hf_tok')
 print('Model download complete.')
 "
-            else
-                bash "$PYTHON_SH" -c "
+                else
+                    bash "$PYTHON_SH" -c "
 from huggingface_hub import snapshot_download
 snapshot_download(repo_id='$MODEL_NAME', local_dir='$MODELS_DIR/$MODEL_SLUG')
 print('Model download complete.')
 "
+                fi
             fi
         }
 
@@ -126,7 +163,7 @@ print('Model download complete.')
                     echo "LLMinfer: After accepting the license, re-run this script."
                 else
                     echo "LLMinfer: After accepting the license, re-run with your token:"
-                    echo "LLMinfer:   ./llminfer.sh $MODEL_NAME --hf-token <your_token>"
+                    echo "LLMinfer:   ./llminfer.sh --model $MODEL_NAME --hf-token <your_token>"
                 fi
                 exit 1
             fi
@@ -161,6 +198,16 @@ print('Model download complete.')
         fi
     fi
 
+# Resolve the exact GGUF filename for llamacpp (after download or if already present)
+if [ "$BACKEND" = "llamacpp" ]; then
+    GGUF_FILE=$(find "$MODELS_DIR/$MODEL_SLUG" -maxdepth 3 \( -iname "*${QUANT_LOWER}*.gguf" -o -iname "*${QUANT_UPPER}*.gguf" \) 2>/dev/null | head -1 | xargs -I{} basename {})
+    if [ -z "$GGUF_FILE" ]; then
+        echo "LLMinfer: Error: No GGUF file matching '$QUANTIZATION' found in $MODELS_DIR/$MODEL_SLUG"
+        exit 1
+    fi
+    echo "LLMinfer: Using GGUF file: $GGUF_FILE"
+fi
+
 # Step 3 - Write runner.json with all resolved configuration
 echo "LLMinfer: Writing runner.json..."
 node -e "
@@ -169,15 +216,13 @@ const conf = {
     model:            '$MODEL_NAME',
     model_slug:       '$MODEL_SLUG',
     backend:          '$BACKEND',
-    device:           '$DEVICE',
     inference_host:   '$INFERENCE_HOST',
     inference_port:   $INFERENCE_PORT,
-    monkshu_host:     '$MONKSHU_HOST',
-    monkshu_port:     $MONKSHU_PORT,
     ssl:              $SSL,
     disable_thinking: true,
     hf_offline:       true
 };
+if ('$GGUF_FILE') conf.gguf_file = '$GGUF_FILE';
 fs.writeFileSync('$RUNNER_JSON', JSON.stringify(conf, null, 4));
 console.log('LLMinfer: runner.json updated.');
 "

@@ -6,7 +6,8 @@
  */
 
 const ENGINES = {
-    vllm: require(`${__dirname}/engines/vllm.js`)
+    vllm:     require(`${__dirname}/engines/vllm.js`),
+    llamacpp: require(`${__dirname}/engines/llamacpp.js`)
 };
 
 let _engine;

@@ -25,6 +25,7 @@ function init_python_env() {
   pip install huggingface_hub
   pip install transformers
   pip install accelerate
+  pip install "llama-cpp-python[server]"
 }
 
 if [ -d "$SCRIPT_DIR/llminferpy" ]; then
