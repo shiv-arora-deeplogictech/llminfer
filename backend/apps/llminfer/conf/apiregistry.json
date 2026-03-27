@@ -1,0 +1,3 @@
+{
+    "/apps/{{app}}/v1/chat/completions" : "/apis/restProxy.js"
+}
