@@ -12,9 +12,9 @@
     "ports": [
         9095
     ],
-    "ssl": true,
-    "sslKeyFile": "/home/deep/ssh-Certs/sslKeyFile.key",
-    "sslCertFile": "/home/deep/ssh-Certs/sslCertFile.crt",
+    "ssl": false,
+    "sslKeyFile": "<ssl_key_file>",
+    "sslCertFile": "<ssl_cert_file>",
     "ipblacklistRefresh": 5000,
     "ipwhitelistRefresh": 5000,
     "virtualhosts": [
