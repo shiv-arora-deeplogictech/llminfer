@@ -72,13 +72,40 @@ GGUF_FILE=""
 
 echo "LLMinfer: model=$MODEL_NAME backend=$BACKEND inference=$INFERENCE_HOST:$INFERENCE_PORT${QUANTIZATION:+ quantization=$QUANTIZATION}"
 
-# Step 1 - Bootstrap Python venv (idempotent)
+# Step 1 - Install system dependencies
+echo "LLMinfer: Checking system dependencies..."
+_MISSING_PKGS=()
+dpkg -s build-essential > /dev/null 2>&1 || _MISSING_PKGS+=(build-essential)
+command -v cmake > /dev/null 2>&1        || _MISSING_PKGS+=(cmake)
+dpkg -s python3-dev > /dev/null 2>&1    || _MISSING_PKGS+=(python3-dev)
+dpkg -s python3-venv > /dev/null 2>&1   || _MISSING_PKGS+=(python3-venv)
+dpkg -s python3-pip > /dev/null 2>&1    || _MISSING_PKGS+=(python3-pip)
+command -v git-lfs > /dev/null 2>&1     || _MISSING_PKGS+=(git-lfs)
+if [ ${#_MISSING_PKGS[@]} -gt 0 ]; then
+    echo "LLMinfer: Installing missing packages: ${_MISSING_PKGS[*]}"
+    apt-get install -y "${_MISSING_PKGS[@]}" || { echo "LLMinfer: ERROR: Failed to install system deps. Try: sudo apt install ${_MISSING_PKGS[*]}"; exit 1; }
+    command -v git-lfs > /dev/null 2>&1 && git lfs install > /dev/null 2>&1
+fi
+
+# Node.js v18+ is required (optional chaining syntax); upgrade if the system version is too old
+_NODE_OK=false
+if command -v node > /dev/null 2>&1; then
+    _NODE_MAJOR=$(node -e "process.stdout.write(String(process.version.match(/^v(\d+)/)[1]))" 2>/dev/null)
+    [ "${_NODE_MAJOR:-0}" -ge 18 ] 2>/dev/null && _NODE_OK=true
+fi
+if [ "$_NODE_OK" = false ]; then
+    echo "LLMinfer: Node.js v18+ not found — installing via NodeSource..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs || { echo "LLMinfer: ERROR: Failed to install Node.js 22."; exit 1; }
+fi
+
+# Step 2 - Bootstrap Python venv (idempotent)
 echo "LLMinfer: Initializing Python environment..."
 bash "$PYTHON_SH" -c "print('Python environment ready.')"
 
 HF_CLI="$SCRIPT_DIR/python/llminferpy/bin/hf"
 
-# Step 2 - Download model (idempotent)
+# Step 3 - Download model (idempotent)
 _model_ready() {
     if [ "$BACKEND" = "llamacpp" ]; then
         find "$TARGET_DIR" -maxdepth 3 -iname "*${QUANTIZATION}*.gguf" 2>/dev/null | grep -q .
@@ -209,7 +236,7 @@ if [ "$BACKEND" = "llamacpp" ]; then
     echo "LLMinfer: Using GGUF file: $GGUF_FILE"
 fi
 
-# Step 3 - Write runner.json with all resolved configuration
+# Step 4 - Write runner.json with all resolved configuration
 echo "LLMinfer: Writing runner.json..."
 node -e "
 const fs = require('fs');
@@ -228,6 +255,6 @@ fs.writeFileSync('$RUNNER_JSON', JSON.stringify(conf, null, 4));
 console.log('LLMinfer: runner.json updated.');
 "
 
-# Step 4 - Launch Monkshu (engine starts inside Monkshu's app initSync)
+# Step 5 - Launch Monkshu (engine starts inside Monkshu's app initSync)
 echo "LLMinfer: Starting Monkshu server..."
 node "$MONKSHU_DIR/backend/server/server.js"
