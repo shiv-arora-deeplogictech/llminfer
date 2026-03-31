@@ -16,8 +16,12 @@ Supports:
 ```
 llminfer.sh --model MODEL [opts]
     │
+    ├── Check & install system deps (build-essential, cmake, python3-dev, python3-venv,
+    │       python3-pip, git-lfs) — skipped if already present
+    ├── Check Node.js v18+ — installs via NodeSource if missing
     ├── Bootstrap Python venv (python/python.sh)
     ├── Download HF model → models/<slug>/
+    │       └── prompts for HF token interactively if model is gated
     ├── Write backend/apps/llminfer/conf/runner.json  (resolved config)
     └── node monkshu/backend/server/server.js
             │
@@ -29,7 +33,20 @@ llminfer.sh --model MODEL [opts]
 
 ```
 
-`llminfer.sh` owns all configuration. It resolves the model, ports, and backend, then writes `runner.json` before handing off to Monkshu. The engine (vLLM or llama.cpp) starts inside Monkshu's `initSync` and exposes a local OpenAI-compatible HTTP server on the **inference port** (default `8080`). Incoming requests are forwarded through `restProxy.js` to the engine's `/v1/chat/completions` endpoint.
+`llminfer.sh` owns all configuration. It resolves the model, ports, and backend, then writes `runner.json` before handing off to Monkshu. The generated `runner.json` contains:
+
+| Field | Description |
+|---|---|
+| `model` | Hugging Face model name |
+| `model_slug` | URL-safe model name (`/` → `--`) |
+| `backend` | `vllm` or `llamacpp` |
+| `inference_host` / `inference_port` | Engine bind address |
+| `ssl` | Whether SSL is enabled on Monkshu |
+| `disable_thinking` | `true` — suppresses chain-of-thought tokens where supported |
+| `hf_offline` | `true` — prevents the engine from making outbound HF requests at runtime |
+| `gguf_file` | *(llamacpp only)* Resolved local GGUF filename |
+
+The engine (vLLM or llama.cpp) starts inside Monkshu's `initSync` and exposes a local OpenAI-compatible HTTP server on the **inference port** (default `8080`). Incoming requests are forwarded through `restProxy.js` to the engine's `/v1/chat/completions` endpoint.
 
 `main.js` is a **CLI debug tool only** — it starts the engine directly and sends a test prompt via HTTP to the engine's OpenAI endpoint, exercising the same code path as the production REST proxy.
 
@@ -39,9 +56,10 @@ llminfer.sh --model MODEL [opts]
 
 ### Prerequisites
 
-- **Node.js** (v18+)
-- **Python 3.9+**
+- **Ubuntu/Debian** host (or compatible) — `llminfer.sh` uses `apt-get` for system deps
 - `monkshu` and `llminfer` must be **sibling directories** under the same parent
+
+> **Node.js v18+**, **Python 3**, and the required build tools (`build-essential`, `cmake`, `python3-dev`, `python3-venv`, `python3-pip`, `git-lfs`) are all installed automatically by `llminfer.sh` on first run if missing. Root/sudo access is required for the package installs.
 
 ### 1. Clone both repos side by side
 
@@ -93,7 +111,7 @@ The script handles everything: Python venv setup, model download, config generat
 | `--host` | `0.0.0.0` | Host the LLM engine binds to |
 | `--quantization` | — | GGUF quantization level, required for `llamacpp` (e.g. `Q5_K_M`) |
 | `--ssl` | off | Enable SSL on the Monkshu server |
-| `--hf-token` | — | Hugging Face access token (or set `HF_TOKEN` env var) |
+| `--hf-token` | — | Hugging Face access token (or set `HF_TOKEN` env var); prompted interactively if omitted and the model is gated |
 
 **Ports summary:**
 - **Inference engine** — `8080` (set via `--inference-port`; internal, not exposed directly)
