@@ -3,9 +3,8 @@
     "model_slug": "Qwen-Qwen2.5-0.5B-Instruct-GGUF",
     "backend": "llamacpp",
     "inference_host": "0.0.0.0",
-    "inference_port": 8080,
-    "ssl": false,
-    "disable_thinking": true,
+    "inference_port": 8081,
+"disable_thinking": true,
     "hf_offline": true,
     "gguf_file": "qwen2.5-0.5b-instruct-q5_k_m.gguf"
 }

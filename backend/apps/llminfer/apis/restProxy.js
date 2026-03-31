@@ -28,32 +28,19 @@ exports.doService = async (jsonReq, _servObject, headers, url) => {
     const rawHost = LLMINFER_CONSTANTS.inference_host;
     const host = (!rawHost || rawHost === "0.0.0.0") ? "127.0.0.1" : rawHost;
     const port = LLMINFER_CONSTANTS.inference_port;
-    const useSSL = !!LLMINFER_CONSTANTS.ssl;
-
     const incomingPath = new URL(url).pathname;
     const llmPath = incomingPath.replace(APP_PATH_PREFIX, "") || "/v1/chat/completions";
 
     const incomingMethod = ((_servObject.req && _servObject.req.method) || "POST").toLowerCase();
-    let method = incomingMethod === "delete" ? (useSSL ? "deleteHttps" : "deleteHttp")
-        : incomingMethod + (useSSL ? "Https" : "");
+    if (incomingMethod !== "post") return { result: false, error: "Method not allowed", status: 405 };
 
     // Drop the host header so the LLM receives its own host, not the proxy's
     const forwardHeaders = { ...headers };
     delete forwardHeaders["host"];
 
-    let parsedBody;
+    LOG.info(`LLMinfer RestProxy: POST → http://${host}:${port}${llmPath}`);
 
-    try {
-        const bodyString = Buffer.from(jsonReq).toString("utf-8");
-        parsedBody = JSON.parse(bodyString);
-    } catch (e) {
-        LOG.error("Failed to parse request body", e);
-        return { result: false, error: "Invalid JSON body", status: 400 };
-    }
-
-    LOG.info(`LLMinfer RestProxy: ${incomingMethod.toUpperCase()} → http${useSSL ? "s" : ""}://${host}:${port}${llmPath}`);
-
-    const { error, data, status } = await rest[method](host, port, llmPath, forwardHeaders, parsedBody);
+    const { error, data, status } = await rest.post(host, port, llmPath, forwardHeaders, jsonReq);
 
     if (error) {
         LOG.error(`LLMinfer RestProxy: LLM returned error (HTTP ${status}): ${error}`);
